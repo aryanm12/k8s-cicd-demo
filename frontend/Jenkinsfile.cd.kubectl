@@ -1,0 +1,93 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        FRONTEND_REPO = 'demo-frontend'
+        CLUSTER_NAME = 'demo-01'
+        KUBECTL_NAMESPACE = 'demo'
+    }
+    
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
+    }
+
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Configure kubectl') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}"
+                    }
+                }
+            }
+        }
+
+        stage('Update Kubernetes Manifests') {
+            steps {
+                script {                    
+                    // Update the image tag in deployment.yaml
+                    sh """
+                        sed -i 's|image: ${ECR_REGISTRY}/${FRONTEND_REPO}:.*|image: ${ECR_REGISTRY}/${FRONTEND_REPO}:${params.IMAGE_TAG}|g' frontend/kubernetes/deployment.yaml
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        // Create namespace if it doesn't exist
+                        sh "kubectl create namespace ${KUBECTL_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        
+                        // Apply Kubernetes manifests
+                        sh """
+                            kubectl apply -f frontend/kubernetes/configmap.yaml -n ${KUBECTL_NAMESPACE}
+                            kubectl apply -f frontend/kubernetes/secret.yaml -n ${KUBECTL_NAMESPACE}
+                            kubectl apply -f frontend/kubernetes/deployment.yaml -n ${KUBECTL_NAMESPACE}
+                            kubectl apply -f frontend/kubernetes/service.yaml -n ${KUBECTL_NAMESPACE}
+                            kubectl apply -f frontend/kubernetes/hpa.yaml -n ${KUBECTL_NAMESPACE}
+                        """
+                        
+                        // Wait for deployment rollout
+                        sh "kubectl rollout status deployment/frontend -n ${KUBECTL_NAMESPACE}"
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        // Check deployment status
+                        sh """
+                            kubectl get deployment frontend -n ${KUBECTL_NAMESPACE}
+                            kubectl get pods -l app=frontend -n ${KUBECTL_NAMESPACE}
+                            kubectl get svc frontend-service -n ${KUBECTL_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Deployment successful!"
+        }
+        failure {
+            echo "Deployment failed!"
+        }
+    }
+}

@@ -1,0 +1,38 @@
+replicaCount: 2
+
+image:
+  repository: 975050024946.dkr.ecr.ap-southeast-1.amazonaws.com/demo-backend
+  tag: 2
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  name: ""
+
+podAnnotations: {}
+
+namespace: demo-helm
+
+service:
+  type: ClusterIP
+  port: 5000
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 400m
+    memory: 512Mi
+
+secret:
+  apiKey: "BASE64_ENCODED_API_KEY"
+
+mongodb:
+  url: "mongodb://mongodb-service:27017/demo"
+  pass: "mongo-password"
+
+nodeEnv: production

@@ -1,0 +1,62 @@
+// Jenkinsfile-helm-deploy
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        BACKEND_REPO = 'demo-backend'
+        CLUSTER_NAME = 'demo-01'
+        NAMESPACE = 'demo-helm'
+        RELEASE_NAME = 'backend'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Configure kubectl') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy with Helm') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {                  
+                        // Deploy/Upgrade with Helm
+                        sh """
+                            helm upgrade --install ${RELEASE_NAME} ./backend/helm \
+                            --namespace ${NAMESPACE} \
+                            --create-namespace \
+                            --values ./backend/helm/values.yaml \
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        sh """
+                            helm status ${RELEASE_NAME} -n ${NAMESPACE}
+                            helm get values ${RELEASE_NAME} -n ${NAMESPACE}
+                            kubectl get pods -l app.kubernetes.io/instance=${RELEASE_NAME} -n ${NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

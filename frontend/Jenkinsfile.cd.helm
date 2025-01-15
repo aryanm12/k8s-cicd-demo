@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        FRONTEND_REPO = 'demo-frontend'
+        CLUSTER_NAME = 'demo-01'
+        HELM_RELEASE_NAME = 'frontend'
+        HELM_NAMESPACE = 'demo-helm'
+    }
+    
+    stages {
+        stage('Clone Repository') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Configure kubectl') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes using Helm') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) { 
+                        // Deploy using Helm
+                        sh """
+                            helm upgrade --install ${HELM_RELEASE_NAME} ./frontend/helm \
+                                --namespace ${HELM_NAMESPACE} \
+                                -f ./frontend/helm/values.yaml \
+                                --create-namespace
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) { 
+                        // Check deployment status
+                        sh """
+                            helm status ${HELM_RELEASE_NAME} -n ${HELM_NAMESPACE}
+                            kubectl get deployment -l app.kubernetes.io/name=frontend -n ${HELM_NAMESPACE}
+                            kubectl get pods -l app.kubernetes.io/name=frontend -n ${HELM_NAMESPACE}
+                            kubectl get svc -l app.kubernetes.io/name=frontend -n ${HELM_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

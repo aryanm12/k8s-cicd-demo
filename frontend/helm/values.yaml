@@ -1,0 +1,47 @@
+replicaCount: 2
+
+image:
+  repository: 975050024946.dkr.ecr.ap-southeast-1.amazonaws.com/demo-frontend
+  tag: 7
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  name: ""
+
+podAnnotations: {}
+
+namespace: demo-helm
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 3000
+
+container:
+  port: 3000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+configMap:
+  backendUrl: "http://backend-service:5000"
+  nodeEnv: "production"
+
+secret:
+  apiKey: "BASE64_ENCODED_API_KEY"

@@ -1,0 +1,99 @@
+// Jenkinsfile-kubectl-deploy
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        BACKEND_REPO = 'demo-backend'
+        CLUSTER_NAME = 'demo-01'
+        NAMESPACE = 'demo'
+    }
+    
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Configure kubectl') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}"
+                    }
+                }
+            }
+        }
+
+        stage('Update Kubernetes Manifests') {
+            steps {
+                script {                    
+                    // Update the image tag in deployment.yaml
+                    sh """
+                        sed -i 's|image: ${ECR_REGISTRY}/${BACKEND_REPO}:.*|image: ${ECR_REGISTRY}/${BACKEND_REPO}:${params.IMAGE_TAG}|g' backend/kubernetes/deployment.yaml
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to EKS') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        // Create namespace if it doesn't exist
+                        sh "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        
+                        // Apply Kubernetes manifests in order
+                        sh """
+                            # Apply ConfigMap first
+                            kubectl apply -f backend/kubernetes/configmap.yaml -n ${NAMESPACE}
+                            
+                            # Apply Secrets
+                            kubectl apply -f backend/kubernetes/secrets.yaml -n ${NAMESPACE}
+                            
+                            # Apply Service
+                            kubectl apply -f backend/kubernetes/service.yaml -n ${NAMESPACE}
+                            
+                            # Apply Deployment
+                            kubectl apply -f backend/kubernetes/deployment.yaml -n ${NAMESPACE}
+                            
+                            # Wait for rollout to complete
+                            kubectl rollout status deployment/backend -n ${NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                        // Check deployment status
+                        sh """
+                            kubectl get deployment backend -n ${NAMESPACE}
+                            kubectl get pods -l app=backend -n ${NAMESPACE}
+                            kubectl get svc backend-service -n ${NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful!"
+        }
+        failure {
+            echo "Deployment failed!"
+        }
+    }
+}

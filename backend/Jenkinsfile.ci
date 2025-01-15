@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        BACKEND_REPO = 'demo-backend'
+    }
+    
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                dir('backend') {
+                        sh 'npm install'
+                }
+            }
+        }
+        
+        stage('Build & Push Docker Image to ECR') {
+            steps {
+                dir('backend') {
+                    script {
+                        def backendImage = "${ECR_REGISTRY}/${BACKEND_REPO}:${BUILD_NUMBER}"
+                        withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                            // Build the Docker image
+                            sh """
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                                docker build -t ${backendImage} .
+                                docker push ${backendImage}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+            sh "docker rmi ${ECR_REGISTRY}/${backend_REPO}:${BUILD_NUMBER}"
+        }
+    }
+}

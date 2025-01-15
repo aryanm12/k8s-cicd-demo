@@ -1,0 +1,50 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '975050024946'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        FRONTEND_REPO = 'demo-frontend'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                dir('frontend') {
+                        sh 'npm install'
+                }
+            }
+        }
+        
+        stage('Build & Push Docker Image to ECR') {
+            steps {
+                dir('frontend') {
+                    script {
+                        def frontendImage = "${ECR_REGISTRY}/${FRONTEND_REPO}:${BUILD_NUMBER}"
+                        withAWS(credentials: 'aws-credentials', region: AWS_REGION) {
+                            // Build the Docker image
+                            sh """
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                                docker build -t ${frontendImage} .
+                                docker push ${frontendImage}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
